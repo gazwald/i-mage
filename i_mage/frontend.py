@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from nicegui import run, ui
 from PIL import ImageOps
 
-from i_mage.compare import compare, open_image
+from i_mage.compare import ImageDetails, compare
 
 
 async def modify_image(func, image, ui_image):
@@ -13,15 +11,18 @@ async def modify_image(func, image, ui_image):
     ui_image.set_source(result)
 
 
-def frontend_image(path: Path, primary: bool = False):
-    pil_image = open_image(path)
+def frontend_image(image: ImageDetails, primary: bool = False):
+    pil_image = image.image
     classes = "bg-blue-500" if primary else ""
 
     with ui.card(align_items="center").classes(classes):
-        ui_image = ui.image(path)
+        ui_image = ui.image(image.image)
 
         with ui.card_section():
-            ui.label(str(path))
+            ui.label(f"Path: {image.path}")
+            ui.label(f"Size: {image.size}")
+            if not primary:
+                ui.label(f"Diff: {image.difference:0.2f}")
 
         with ui.card_actions():
             with ui.row(wrap=False):
@@ -35,25 +36,21 @@ def frontend_image(path: Path, primary: bool = False):
                 )
 
 
-def frontend_comparable(image: Path):
+def frontend_comparable(image: ImageDetails):
     frontend_image(image, True)
 
 
-def frontend_similar(images: set[Path]):
+def frontend_similar(images: set[ImageDetails]):
     for image in images:
         frontend_image(image)
 
 
 def frontend():
-    images = compare()
-    for image, similar in images.items():
-        if not similar:
-            continue
-
+    for image in compare():
         with ui.row():
             with ui.column():
                 frontend_comparable(image)
             with ui.grid(columns=4):
-                frontend_similar(similar)
+                frontend_similar(image.similar)
 
         ui.separator()

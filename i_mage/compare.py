@@ -1,26 +1,49 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field
+from functools import cache
 from pathlib import Path
-from pprint import pprint
 from typing import TYPE_CHECKING
 
 from PIL import Image
 
 if TYPE_CHECKING:
-    from typing import Callable
+    from typing import Callable, Generator
 
     from PIL.Image import Image as ImageType
 
 
+@dataclass
 class ImageDetails:
     path: Path
     image: ImageType
-    difference: float
-    size: int
-    resolution: tuple[int, int]
+    similar: set[ImageDetails] = field(default_factory=set)
+    difference: float = 0.0
 
     def __hash__(self) -> int:
         return self.path.__hash__()
+
+    @property
+    def size(self) -> int:
+        return self.path.stat().st_size
+
+    @property
+    def resolution(self) -> tuple[int, int]:
+        return self.image.size
+
+    def __eq__(self, value: object, /) -> bool:
+        if not isinstance(value, ImageDetails):
+            return False
+
+        return self.path == value.path
+
+    def contains(self, similar_path: Path) -> bool:
+        for image in self.similar:
+            if similar_path == image.path:
+                return True
+
+        return False
 
 
 def is_image(path: Path) -> bool:
@@ -32,39 +55,48 @@ def is_image(path: Path) -> bool:
     return path.suffix in {".png", ".jpg", ".jpeg", ".gif"}
 
 
-def open_image(path: Path) -> ImageType:
-    return Image.open(path)
+def image_paths(path: Path) -> Generator[Path, None, None]:
+    for image_path in path.glob("*"):
+        if not is_image(image_path):
+            continue
+
+        yield image_path
 
 
-def load(path: Path) -> dict[Path, ImageType]:
-    return {
-        image_path: open_image(image_path) for image_path in path.glob("*") if is_image(image_path)
-    }
+@cache
+def open_image(path: Path) -> ImageDetails:
+    return ImageDetails(path=path, image=Image.open(path))
+
+
+def loader(path: Path, batch_size: int = 4) -> set[ImageDetails]:
+    with ThreadPoolExecutor() as executor:
+        return set(
+            image
+            for image in executor.map(
+                open_image,
+                image_paths(path),
+                buffersize=batch_size,
+            )
+        )
 
 
 def image_cache(
-    func: Callable[[Path, ImageType], ImageType],
-) -> Callable[[Path, ImageType], ImageType]:
+    func: Callable[[ImageDetails], ImageType],
+) -> Callable[[ImageDetails], ImageType]:
     images: dict[Path, ImageType] = {}
 
-    def wrapper(path: Path, image: ImageType) -> ImageType:
-        if path not in images:
-            images[path] = func(path, image)
+    def wrapper(details: ImageDetails) -> ImageType:
+        if details.path not in images:
+            images[details.path] = func(details)
 
-        return images[path]
+        return images[details.path]
 
     return wrapper
 
 
 @image_cache
-def resize(
-    path: Path,
-    image: ImageType,
-) -> ImageType:
-    """
-    PIL Images aren't hashable so we're using the Path in the cache
-    """
-    return image.resize((512, 512))
+def resize(details: ImageDetails) -> ImageType:
+    return details.image.resize((512, 512))
 
 
 def comparable_geometry(left: ImageType, right: ImageType) -> bool:
@@ -78,38 +110,36 @@ def difference(left: ImageType, right: ImageType) -> float:
     return (difference / len(left_data) + difference / len(right_data)) / 2
 
 
-def same(
-    left: ImageType,
-    right: ImageType,
-    threshhold: float = 0.02,
-) -> bool:
+def same(left: ImageType, right: ImageType) -> float:
     if left == right:
-        return True
+        return 0.0
 
-    return difference(left, right) <= threshhold
+    return difference(left, right)
 
 
-def compare() -> dict[Path, set[Path]]:
-    images = load(Path("./images"))
-    comparison: dict[Path, set[Path]] = {}
-    for left_path, left_image in images.items():
-        comparison[left_path] = set()
-        for right_path, right_image in images.items():
-            if left_path == right_path:
+def compare(threshhold: float = 0.02) -> Generator[ImageDetails, None, None]:
+    images: set[ImageDetails] = loader(Path("./images"))
+    for left in images:
+        for right in images:
+            if left == right:
                 continue
 
-            if right_path in comparison.keys():
+            if left.contains(right.path):
                 continue
 
-            if comparable_geometry(left_image, right_image):
-                left = left_image
-                right = right_image
+            if comparable_geometry(left.image, right.image):
+                diff = same(left.image, right.image)
             else:
-                left = resize(left_path, left_image)
-                right = resize(right_path, right_image)
+                diff = same(resize(left), resize(right))
 
-            if same(left, right):
-                comparison[left_path].add(right_path)
+            if diff <= threshhold:
+                left.similar.add(
+                    ImageDetails(
+                        path=right.path,
+                        image=right.image,
+                        difference=diff,
+                    )
+                )
 
-    pprint(comparison)
-    return comparison
+        if left.similar:
+            yield left
