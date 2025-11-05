@@ -20,7 +20,8 @@ def frontend_image(image: ImageDetails, primary: bool = False):
 
         with ui.card_section():
             ui.label(f"Path: {image.path}")
-            ui.label(f"Size: {image.size}")
+            ui.label(f"Size: {image.size}kb")
+            ui.label(f"Res: {image.resolution}")
             if not primary:
                 ui.label(f"Diff: {image.difference:0.2f}")
 
@@ -41,11 +42,12 @@ def frontend_comparable(image: ImageDetails):
 
 
 def frontend_similar(images: set[ImageDetails]):
-    for image in images:
+    for image in sorted(images):
         frontend_image(image)
 
 
-def frontend():
+@ui.refreshable
+def frontend_images():
     for image in compare():
         with ui.row():
             with ui.column():
@@ -54,3 +56,11 @@ def frontend():
                 frontend_similar(image.similar)
 
         ui.separator()
+
+
+def get_images():
+    frontend_images()
+
+
+def frontend():
+    ui.button("Go", on_click=get_images)

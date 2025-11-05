@@ -24,23 +24,35 @@ class ImageDetails:
     def __hash__(self) -> int:
         return self.path.__hash__()
 
+    def __eq__(self, value: object, /) -> bool:
+        if isinstance(value, ImageDetails):
+            return self.difference == value.difference
+
+        return False
+
+    def __lt__(self, value: object) -> bool:
+        if isinstance(value, ImageDetails):
+            return self.difference < value.difference
+
+        return False
+
+    def __gt__(self, value: object) -> bool:
+        if isinstance(value, ImageDetails):
+            return self.difference > value.difference
+
+        return False
+
     @property
     def size(self) -> int:
-        return self.path.stat().st_size
+        return self.path.stat().st_size // 1024
 
     @property
-    def resolution(self) -> tuple[int, int]:
-        return self.image.size
+    def resolution(self) -> str:
+        return f"{self.image.size[0]} x {self.image.size[0]}"
 
-    def __eq__(self, value: object, /) -> bool:
-        if not isinstance(value, ImageDetails):
-            return False
-
-        return self.path == value.path
-
-    def contains(self, similar_path: Path) -> bool:
+    def contains(self, other: ImageDetails) -> bool:
         for image in self.similar:
-            if similar_path == image.path:
+            if image.path == other.path:
                 return True
 
         return False
@@ -119,12 +131,13 @@ def same(left: ImageType, right: ImageType) -> float:
 
 def compare(threshhold: float = 0.02) -> Generator[ImageDetails, None, None]:
     images: set[ImageDetails] = loader(Path("./images"))
+    done = set()
     for left in images:
         for right in images:
-            if left == right:
+            if left.path == right.path:
                 continue
 
-            if left.contains(right.path):
+            if right.path in done:
                 continue
 
             if comparable_geometry(left.image, right.image):
@@ -143,3 +156,4 @@ def compare(threshhold: float = 0.02) -> Generator[ImageDetails, None, None]:
 
         if left.similar:
             yield left
+        done.add(left.path)
