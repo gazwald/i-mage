@@ -4,7 +4,8 @@ from pathlib import Path
 from pprint import pprint
 from typing import TYPE_CHECKING
 
-from PIL import Image
+from nicegui import run, ui
+from PIL import Image, ImageOps
 
 if TYPE_CHECKING:
     from typing import Callable
@@ -71,14 +72,14 @@ def same(
     left: ImageType,
     right: ImageType,
     threshhold: float = 0.02,
-) -> float:
+) -> bool:
     if left == right:
-        return 0.0
+        return True
 
     return difference(left, right) <= threshhold
 
 
-def main():
+def compare() -> dict[Path, set[Path]]:
     images = load(Path("./images"))
     comparison: dict[Path, set[Path]] = {}
     for left_path, left_image in images.items():
@@ -101,7 +102,58 @@ def main():
                 comparison[left_path].add(right_path)
 
     pprint(comparison)
+    return comparison
 
 
-if __name__ == "__main__":
-    main()
+async def modify_image(func, image, ui_image):
+    result = await run.cpu_bound(func, image)
+    ui_image.set_source(result)
+
+
+def frontend_image(path: Path, primary: bool = False):
+    pil_image = open_image(path)
+    classes = "bg-blue-500" if primary else ""
+
+    with ui.card(align_items="center").classes(classes):
+        ui_image = ui.image(pil_image)
+
+        with ui.card_section():
+            ui.label(str(path))
+
+        with ui.card_actions():
+            with ui.row(wrap=False):
+                ui.button(
+                    "Mirror",
+                    on_click=lambda: modify_image(ImageOps.mirror, pil_image, ui_image),
+                )
+                ui.button(
+                    "Flip",
+                    on_click=lambda: modify_image(ImageOps.flip, pil_image, ui_image),
+                )
+
+
+def frontend_comparable(image: Path):
+    frontend_image(image, True)
+
+
+def frontend_similar(images: set[Path]):
+    for image in images:
+        frontend_image(image)
+
+
+def frontend(images: dict[Path, set[Path]]):
+    for image, similar in images.items():
+        if not similar:
+            continue
+
+        with ui.row():
+            with ui.column():
+                frontend_comparable(image)
+            with ui.grid(columns=4):
+                frontend_similar(similar)
+
+        ui.separator()
+
+
+frontend(compare())
+ui.run(dark=True)
