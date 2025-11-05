@@ -11,15 +11,16 @@ from PIL import Image
 if TYPE_CHECKING:
     from typing import Callable, Generator
 
-    from PIL.Image import Image as ImageType
+    from PIL.Image import Image as PIL_Image
 
 
 @dataclass
 class ImageDetails:
     path: Path
-    image: ImageType
+    image: PIL_Image
     similar: set[ImageDetails] = field(default_factory=set)
     difference: float = 0.0
+    duplicate: bool = False
 
     def __hash__(self) -> int:
         return self.path.__hash__()
@@ -93,11 +94,11 @@ def loader(path: Path, batch_size: int = 4) -> set[ImageDetails]:
 
 
 def image_cache(
-    func: Callable[[ImageDetails], ImageType],
-) -> Callable[[ImageDetails], ImageType]:
-    images: dict[Path, ImageType] = {}
+    func: Callable[[ImageDetails], PIL_Image],
+) -> Callable[[ImageDetails], PIL_Image]:
+    images: dict[Path, PIL_Image] = {}
 
-    def wrapper(details: ImageDetails) -> ImageType:
+    def wrapper(details: ImageDetails) -> PIL_Image:
         if details.path not in images:
             images[details.path] = func(details)
 
@@ -107,22 +108,22 @@ def image_cache(
 
 
 @image_cache
-def resize(details: ImageDetails) -> ImageType:
+def resize(details: ImageDetails) -> PIL_Image:
     return details.image.resize((512, 512))
 
 
-def comparable_geometry(left: ImageType, right: ImageType) -> bool:
+def comparable_geometry(left: PIL_Image, right: PIL_Image) -> bool:
     return len(set([left.width, right.width, left.height, right.height])) == 2
 
 
-def difference(left: ImageType, right: ImageType) -> float:
+def difference(left: PIL_Image, right: PIL_Image) -> float:
     left_data: set[tuple[int, ...]] = set(left.getdata())  # type:ignore
     right_data: set[tuple[int, ...]] = set(right.getdata())  # type:ignore
     difference: int = len(left_data ^ right_data)
     return (difference / len(left_data) + difference / len(right_data)) / 2
 
 
-def same(left: ImageType, right: ImageType) -> float:
+def same(left: PIL_Image, right: PIL_Image) -> float:
     if left == right:
         return 0.0
 
@@ -157,3 +158,4 @@ def compare(threshhold: float = 0.02) -> Generator[ImageDetails, None, None]:
         if left.similar:
             yield left
         done.add(left.path)
+    Path("./duplicates").mkdir(exist_ok=True)
